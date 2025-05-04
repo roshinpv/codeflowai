@@ -36,8 +36,8 @@ export default function Layout({
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col items-center justify-center">
             <p className="text-gray-500 text-sm">
-              Built with <a href="https://github.com/the-pocket/PocketFlow" target="_blank" rel="noopener noreferrer" className="text-wf-red hover:underline">
-                PocketFlow
+               <a href="https://github.com/the-pocket/PocketFlow" target="_blank" rel="noopener noreferrer" className="text-wf-red hover:underline">
+                :)
               </a>
             </p>
             <p className="mt-1 text-gray-400 text-xs">

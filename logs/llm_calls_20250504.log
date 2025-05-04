@@ -1,0 +1,4 @@
+2025-05-04 11:07:01,762 - WARNING - Prompt too large: ~4301108 tokens. Truncating to ~8000 tokens.
+2025-05-04 11:07:19,725 - WARNING - Prompt too large: ~25081 tokens. Truncating to ~8000 tokens.
+2025-05-04 12:39:11,852 - WARNING - Prompt too large: ~147191 tokens. Truncating to ~8000 tokens.
+2025-05-04 12:39:27,274 - WARNING - Prompt too large: ~147191 tokens. Truncating to ~8000 tokens.

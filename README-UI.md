@@ -111,8 +111,3 @@ yarn dev
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Acknowledgments
-
-- Built with [PocketFlow](https://github.com/the-pocket/PocketFlow)
-- Uses [FastAPI](https://fastapi.tiangolo.com/) for the backend
-- Uses [Next.js](https://nextjs.org/) for the frontend 
