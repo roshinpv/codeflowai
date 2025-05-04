@@ -1,0 +1,14 @@
+/.venv
+/__pycache__
+.windsurfrules
+*.png
+.vscode/launch.json
+/backend/logs
+/backend/output
+/docs
+/frontend/.next/cache
+/frontend/.next/static
+/frontend/node_modules
+/utils/__pycache__
+/output_1
+/output
