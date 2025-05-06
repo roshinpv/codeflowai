@@ -2,3 +2,9 @@
 2025-05-04 11:07:19,725 - WARNING - Prompt too large: ~25081 tokens. Truncating to ~8000 tokens.
 2025-05-04 12:39:11,852 - WARNING - Prompt too large: ~147191 tokens. Truncating to ~8000 tokens.
 2025-05-04 12:39:27,274 - WARNING - Prompt too large: ~147191 tokens. Truncating to ~8000 tokens.
+2025-05-04 22:16:36,718 - WARNING - Prompt too large: ~147191 tokens. Truncating to ~8000 tokens.
+2025-05-04 22:23:40,177 - WARNING - Prompt too large: ~147204 tokens. Truncating to ~8000 tokens.
+2025-05-06 11:28:28,896 - WARNING - Prompt too large: ~594883 tokens. Truncating to ~8000 tokens.
+2025-05-06 11:28:28,896 - WARNING - Prompt too large: ~98471 tokens. Truncating to ~8000 tokens.
+2025-05-06 11:29:50,381 - WARNING - Prompt too large: ~98471 tokens. Truncating to ~8000 tokens.
+2025-05-06 11:30:34,171 - WARNING - Prompt too large: ~30292 tokens. Truncating to ~8000 tokens.

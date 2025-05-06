@@ -142,7 +142,7 @@ For the project `{project_name}`:
 Codebase Context:
 {context}
 
-{language_instruction}Analyze the codebase context.
+{language_instruction}Analyze the codebase context also what business features/functionality it provides.
 Identify the top 5-{max_abstraction_num} core most important abstractions to help those new to the codebase.
 
 For each abstraction, provide:
