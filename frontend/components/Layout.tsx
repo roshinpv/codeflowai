@@ -12,8 +12,8 @@ interface LayoutProps {
 
 export default function Layout({ 
   children, 
-  title = 'CodeFlowAI',
-  description = 'Generate comprehensive tutorials from your codebase',
+  title = 'CloudView',
+  description = 'Analyze your codebase for cloud readiness',
   transparentHeader = false,
   withPadding = true 
 }: LayoutProps) {
@@ -37,11 +37,11 @@ export default function Layout({
           <div className="flex flex-col items-center justify-center">
             <p className="text-gray-500 text-sm">
                <a href="https://github.com/the-pocket/PocketFlow" target="_blank" rel="noopener noreferrer" className="text-wf-red hover:underline">
-                :)
+                ...
               </a>
             </p>
             <p className="mt-1 text-gray-400 text-xs">
-              &copy; {new Date().getFullYear()} CodeFlowAI
+              &copy; {new Date().getFullYear()} CloudView
             </p>
           </div>
         </div>

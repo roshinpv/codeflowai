@@ -12,6 +12,18 @@ interface JobStatus {
   project_name?: string
   output_dir?: string
   error?: string
+  progress?: number
+  current_phase?: string
+  phase_index?: number
+  phase_progress?: number
+  phase_total?: number
+  total_phases?: number
+  phases?: string[]
+  phase_message?: string
+  progress_message?: string
+  detailed_status?: {
+    [key: string]: any
+  }
 }
 
 export default function JobStatusPage() {
@@ -22,7 +34,7 @@ export default function JobStatusPage() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    // Poll job status every 5 seconds
+    // Poll job status every 3 seconds
     const fetchStatus = async () => {
       if (!jobId) return
 
@@ -42,7 +54,7 @@ export default function JobStatusPage() {
     }
 
     fetchStatus()
-    const intervalId = setInterval(fetchStatus, 5000)
+    const intervalId = setInterval(fetchStatus, 3000)
 
     return () => clearInterval(intervalId)
   }, [jobId])
@@ -106,6 +118,19 @@ export default function JobStatusPage() {
   const seconds = elapsedSec % 60;
   const elapsedFormatted = `${minutes}m ${seconds}s`;
 
+  // Format phase progress (if available)
+  const phaseProgress = job.phase_progress !== undefined && job.phase_total ? 
+    Math.min(100, Math.round((job.phase_progress / job.phase_total) * 100)) : 0;
+  
+  // Determine the progress message to display
+  const progressMessage = job.progress_message || job.phase_message || '';
+  
+  // Organize detailed status for display
+  const detailedStatus = job.detailed_status || {};
+  const detailedStatusItems = Object.entries(detailedStatus)
+    .map(([key, value]) => ({key, value}))
+    .filter(item => item.value !== undefined && item.value !== null);
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Head>
@@ -116,7 +141,7 @@ export default function JobStatusPage() {
       {/* Header */}
       <header className="bg-wf-red text-white py-4 px-6 shadow-md">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <h1 className="text-xl font-bold tracking-tight">CodeFlowAI</h1>
+          <h1 className="text-xl font-bold tracking-tight">CloudView</h1>
           <Link href="/" className="hover:underline text-white font-medium">
             Home
           </Link>
@@ -128,7 +153,7 @@ export default function JobStatusPage() {
           <div className="p-6 border-b border-gray-200">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between">
               <h2 className="text-2xl font-bold text-gray-800 mb-2 md:mb-0">
-                {job.project_name || 'Tutorial Generation'}
+                {job.project_name || 'Cloud Analysis'}
               </h2>
               
               <div className="inline-flex items-center">
@@ -148,12 +173,108 @@ export default function JobStatusPage() {
             {job.status === 'running' && (
               <div className="mb-6">
                 <div className="relative pt-1">
-                  <div className="overflow-hidden h-2 mb-4 text-xs flex rounded bg-gray-200">
-                    <div className="w-full bg-wf-red animate-pulse rounded"></div>
-                  </div>
-                  <p className="text-center text-sm text-gray-600">
-                    Processing your tutorial. This may take several minutes...
-                  </p>
+                  {job.progress !== undefined ? (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="text-xs font-semibold inline-block text-gray-600">
+                            Overall Progress: {job.progress}%
+                          </span>
+                        </div>
+                      </div>
+                      <div className="overflow-hidden h-2 mb-4 text-xs flex rounded bg-gray-200">
+                        <div 
+                          style={{ width: `${job.progress}%` }} 
+                          className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-wf-red transition-all duration-300"
+                        ></div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="overflow-hidden h-2 mb-4 text-xs flex rounded bg-gray-200">
+                      <div className="w-full bg-wf-red animate-pulse rounded"></div>
+                    </div>
+                  )}
+                  
+                  {/* Current phase information */}
+                  {job.current_phase && (
+                    <div className="mt-4 mb-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="text-sm font-semibold inline-block text-gray-700">
+                            Current Phase: {job.current_phase} 
+                            {job.phase_index !== undefined && job.total_phases && 
+                              ` (${job.phase_index + 1}/${job.total_phases})`}
+                          </span>
+                        </div>
+                        {job.phase_progress !== undefined && job.phase_total && (
+                          <div>
+                            <span className="text-xs font-semibold inline-block text-gray-600">
+                              {job.phase_progress}/{job.phase_total} ({phaseProgress}%)
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Phase progress bar */}
+                      {job.phase_progress !== undefined && job.phase_total && (
+                        <div className="overflow-hidden h-2 mb-1 text-xs flex rounded bg-gray-100">
+                          <div 
+                            style={{ width: `${phaseProgress}%` }} 
+                            className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-500 transition-all duration-300"
+                          ></div>
+                        </div>
+                      )}
+                      
+                      {/* Progress message */}
+                      {progressMessage && (
+                        <p className="text-sm text-gray-600 mt-1">
+                          {progressMessage}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Phases timeline */}
+                  {job.phases && job.phases.length > 0 && (
+                    <div className="mt-6">
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">Processing Phases:</h4>
+                      <div className="flex flex-wrap">
+                        {job.phases.map((phase, index) => (
+                          <div key={index} className="flex items-center mr-4 mb-2">
+                            <div className={`w-3 h-3 rounded-full mr-1 ${
+                              job.phase_index === undefined ? 'bg-gray-300' :
+                              index < job.phase_index ? 'bg-green-500' :
+                              index === job.phase_index ? 'bg-blue-500 animate-pulse' :
+                              'bg-gray-300'
+                            }`}></div>
+                            <span className={`text-xs ${
+                              job.phase_index === undefined ? 'text-gray-600' :
+                              index < job.phase_index ? 'text-green-700' :
+                              index === job.phase_index ? 'text-blue-700 font-medium' :
+                              'text-gray-600'
+                            }`}>
+                              {phase}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Detailed status information */}
+                  {detailedStatusItems.length > 0 && (
+                    <div className="mt-4 bg-gray-50 p-3 rounded-md">
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">Analysis Status:</h4>
+                      <div className="grid grid-cols-2 gap-2">
+                        {detailedStatusItems.map(({key, value}) => (
+                          <div key={key} className="text-xs">
+                            <span className="font-medium text-gray-700">{key.replace(/_/g, ' ')}:</span>{' '}
+                            <span className="text-gray-600">{value.toString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -220,10 +341,10 @@ export default function JobStatusPage() {
 
               {job.status === 'completed' && job.project_name && (
                 <Link 
-                  href={`/view/${job.project_name}`}
+                  href={`/view/cloud-dashboard/${job.project_name}`}
                   className="inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-wf-red hover:bg-opacity-90 focus:outline-none transition duration-150"
                 >
-                  View Tutorial
+                  View Results
                 </Link>
               )}
 
@@ -241,7 +362,7 @@ export default function JobStatusPage() {
       <footer className="mt-12 py-6 bg-gray-100">
         <div className="max-w-4xl mx-auto px-6 text-center text-gray-600">
           <p className="text-sm">
-            &copy; {new Date().getFullYear()} CodeFlowAI
+            &copy; {new Date().getFullYear()} CloudView
           </p>
         </div>
       </footer>

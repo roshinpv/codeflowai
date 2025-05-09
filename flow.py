@@ -2,32 +2,21 @@ from pocketflow import Flow
 # Import all node classes from nodes.py
 from nodes import (
     FetchRepo,
-    IdentifyAbstractions,
-    AnalyzeRelationships,
-    OrderChapters,
-    WriteChapters,
-    CombineTutorial
+    CloudReadinessAnalysis
 )
 
-def create_tutorial_flow():
-    """Creates and returns the codebase tutorial generation flow."""
-
+def create_cloud_readiness_flow():
+    """Creates and returns a standalone cloud readiness analysis flow.
+    This allows running the cloud analysis independently of the tutorial generation.
+    """
     # Instantiate nodes
     fetch_repo = FetchRepo()
-    identify_abstractions = IdentifyAbstractions(max_retries=5, wait=20)
-    analyze_relationships = AnalyzeRelationships(max_retries=5, wait=20)
-    order_chapters = OrderChapters(max_retries=5, wait=20)
-    write_chapters = WriteChapters(max_retries=5, wait=20) # This is a BatchNode
-    combine_tutorial = CombineTutorial()
-
-    # Connect nodes in sequence based on the design
-    fetch_repo >> identify_abstractions
-    identify_abstractions >> analyze_relationships
-    analyze_relationships >> order_chapters
-    order_chapters >> write_chapters
-    write_chapters >> combine_tutorial
-
+    cloud_readiness = CloudReadinessAnalysis(max_retries=3, wait=5)
+    
+    # Connect nodes directly - fetch repo then analyze cloud readiness
+    fetch_repo >> cloud_readiness
+    
     # Create the flow starting with FetchRepo
-    tutorial_flow = Flow(start=fetch_repo)
-
-    return tutorial_flow
+    cloud_flow = Flow(start=fetch_repo)
+    
+    return cloud_flow

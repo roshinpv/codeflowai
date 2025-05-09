@@ -24,20 +24,15 @@ self.__BUILD_MANIFEST = {
       "static/chunks/main.js",
       "static/chunks/pages/_error.js"
     ],
-    "/history": [
+    "/cloud-analysis": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/history.js"
+      "static/chunks/pages/cloud-analysis.js"
     ],
-    "/status/[jobId]": [
+    "/cloud-history": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/status/[jobId].js"
-    ],
-    "/view/[projectName]": [
-      "static/chunks/webpack.js",
-      "static/chunks/main.js",
-      "static/chunks/pages/view/[projectName].js"
+      "static/chunks/pages/cloud-history.js"
     ]
   },
   "ampFirstPages": []

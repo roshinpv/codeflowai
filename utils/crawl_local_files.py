@@ -44,6 +44,10 @@ def crawl_local_files(
             )
     # --- End Load .gitignore ---
 
+    # Debug print
+    # print(f"Include patterns: {include_patterns}")
+    # print(f"Exclude patterns: {exclude_patterns}")
+
     for root, dirs, files in os.walk(directory):
         # Filter directories using .gitignore and exclude_patterns early to avoid descending
         # Need to process dirs list *in place* for os.walk to respect it
@@ -60,9 +64,13 @@ def crawl_local_files(
             if exclude_patterns:
                 for pattern in exclude_patterns:
                     # Match pattern against full relative path or directory name itself
-                    if fnmatch.fnmatch(dirpath_rel, pattern) or fnmatch.fnmatch(
-                        d, pattern
-                    ):
+                    pattern_matches = (
+                        fnmatch.fnmatch(dirpath_rel, pattern) or 
+                        fnmatch.fnmatch(d, pattern) or
+                        # Handle double-star patterns
+                        (pattern.startswith("**/") and fnmatch.fnmatch(dirpath_rel, pattern[3:]))
+                    )
+                    if pattern_matches:
                         excluded_dirs.add(d)
                         break
 
@@ -87,19 +95,32 @@ def crawl_local_files(
             # 1. Check .gitignore first
             if gitignore_spec and gitignore_spec.match_file(relpath):
                 excluded = True
+                # print(f"Excluded by gitignore: {relpath}")
 
             # 2. Check standard exclude_patterns if not already excluded by .gitignore
             if not excluded and exclude_patterns:
                 for pattern in exclude_patterns:
-                    if fnmatch.fnmatch(relpath, pattern):
+                    if (fnmatch.fnmatch(relpath, pattern) or
+                        (pattern.startswith("**/") and fnmatch.fnmatch(relpath, pattern[3:]))):
                         excluded = True
+                        # print(f"Excluded by pattern {pattern}: {relpath}")
                         break
 
+            # --- Inclusion check ---
             included = False
             if include_patterns:
                 for pattern in include_patterns:
-                    if fnmatch.fnmatch(relpath, pattern):
+                    # Multiple ways to match the pattern
+                    if (fnmatch.fnmatch(relpath, pattern) or  # Full path match
+                        fnmatch.fnmatch(filename, pattern) or  # Just filename match
+                        # Special handling for directory-based patterns like **/src/**/*.java
+                        (pattern.startswith("**/") and fnmatch.fnmatch(relpath, pattern[3:])) or
+                        # Try with just the extension for *.ext type patterns
+                        (pattern.startswith("*.") and filename.endswith(pattern[1:])) or
+                        # Handle patterns like **/src/**/*
+                        (pattern.endswith("/*") and relpath.startswith(pattern[:-1]))):
                         included = True
+                        # print(f"Included by pattern {pattern}: {relpath}")
                         break
             else:
                 # If no include patterns, include everything *not excluded*
@@ -107,16 +128,19 @@ def crawl_local_files(
 
             # Skip if not included or if excluded (by either method)
             if not included or excluded:
+                # print(f"Skipping {relpath}: included={included}, excluded={excluded}")
                 continue
 
             # Check file size
             if max_file_size and os.path.getsize(filepath) > max_file_size:
+                # print(f"Skipping {relpath}: size {os.path.getsize(filepath)} exceeds limit {max_file_size}")
                 continue
 
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
                     content = f.read()
                 files_dict[relpath] = content
+                # print(f"Added {relpath}")
             except Exception as e:
                 print(f"Warning: Could not read file {filepath}: {e}")
 

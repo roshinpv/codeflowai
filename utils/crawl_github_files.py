@@ -5,8 +5,13 @@ import tempfile
 import git
 import time
 import fnmatch
+import random
 from typing import Union, Set, List, Dict, Tuple, Any
 from urllib.parse import urlparse
+
+# Add a simple cache to avoid fetching the same URLs repeatedly
+_request_cache = {}
+MAX_CACHE_SIZE = 100
 
 def crawl_github_files(
     repo_url, 
@@ -36,6 +41,18 @@ def crawl_github_files(
     Returns:
         dict: Dictionary with files and statistics
     """
+    # If no token is provided, check environment and show recommendation
+    if not token:
+        token = os.environ.get("GITHUB_TOKEN")
+        if not token:
+            # In future versions, we might check a configuration file for tokens
+            print("\n⚠️ WARNING: No GitHub token provided. You may encounter rate limit issues.")
+            print("To avoid GitHub API rate limits, please configure a token:")
+            print("  1. Go to Settings page in the CloudView UI and configure your GitHub token")
+            print("  2. Or set GITHUB_TOKEN environment variable")
+            print("  3. Or pass token parameter in function call")
+            print("Create a token at: https://github.com/settings/tokens\n")
+
     # Convert single pattern to set
     if include_patterns and isinstance(include_patterns, str):
         include_patterns = {include_patterns}
@@ -44,17 +61,38 @@ def crawl_github_files(
 
     def should_include_file(file_path: str, file_name: str) -> bool:
         """Determine if a file should be included based on patterns"""
+        # Debug output to help understand matching issues
+        # print(f"Checking file: {file_path} (filename: {file_name})")
+        # if include_patterns:
+        #     print(f"Include patterns: {include_patterns}")
+        # if exclude_patterns:
+        #     print(f"Exclude patterns: {exclude_patterns}")
+            
         # If no include patterns are specified, include all files
         if not include_patterns:
             include_file = True
         else:
-            # Check if file matches any include pattern
-            include_file = any(fnmatch.fnmatch(file_name, pattern) for pattern in include_patterns)
+            # Check if file matches any include pattern - try both the full path and just the filename
+            include_file = any(
+                fnmatch.fnmatch(file_path, pattern) or 
+                fnmatch.fnmatch(file_name, pattern) or
+                # Special handling for directory-based patterns like **/src/**/*.java
+                (pattern.startswith("**/") and fnmatch.fnmatch(file_path, pattern[3:])) or
+                # Try with just the extension
+                (pattern.startswith("**/") and pattern.endswith("/*.*") and 
+                 file_name.endswith(pattern.split(".")[-1]))
+                for pattern in include_patterns
+            )
 
         # If exclude patterns are specified, check if file should be excluded
         if exclude_patterns and include_file:
-            # Exclude if file matches any exclude pattern
-            exclude_file = any(fnmatch.fnmatch(file_path, pattern) for pattern in exclude_patterns)
+            # Exclude if file matches any exclude pattern - check both path and filename
+            exclude_file = any(
+                fnmatch.fnmatch(file_path, pattern) or 
+                fnmatch.fnmatch(file_name, pattern) or
+                (pattern.startswith("**/") and fnmatch.fnmatch(file_path, pattern[3:]))
+                for pattern in exclude_patterns
+            )
             return not exclude_file
 
         return include_file
@@ -68,16 +106,25 @@ def crawl_github_files(
             print(f"Cloning SSH repo {repo_url} to temp dir {tmpdirname} ...")
             try:
                 repo = git.Repo.clone_from(repo_url, tmpdirname)
+                print(f"Successfully cloned repository")
             except Exception as e:
                 print(f"Error cloning repo: {e}")
-                return {"files": {}, "stats": {"error": str(e)}}
+                error_message = str(e)
+                
+                # Check if this is a git-lfs related error but the clone partially succeeded
+                if "git-lfs: command not found" in error_message and os.path.exists(os.path.join(tmpdirname, ".git")):
+                    print("Git LFS error detected, but clone partially succeeded. Continuing with available files...")
+                    # Continue with the partially cloned repository
+                else:
+                    # For other errors, return empty results
+                    return {"files": {}, "stats": {"error": error_message}}
 
             # Attempt to checkout specific commit/branch if in URL
             # Parse ref and subdir from SSH URL? SSH URLs don't have branch info embedded
             # So rely on default branch, or user can checkout manually later
             # Optionally, user can pass ref explicitly in future API
 
-            # Walk directory
+            # Walk directory, even if clone was partial (git-lfs errors)
             files = {}
             skipped_files = []
 
@@ -120,7 +167,10 @@ def crawl_github_files(
                     "base_path": None,
                     "include_patterns": include_patterns,
                     "exclude_patterns": exclude_patterns,
-                    "source": "ssh_clone"
+                    "source": "ssh_clone",
+                    "partial_clone": "git-lfs: command not found" in locals().get('error_message', '') 
+                                     if 'error_message' in locals() else False,
+                    "error": locals().get('error_message', None)
                 }
             }
 
@@ -135,38 +185,89 @@ def crawl_github_files(
     owner = path_parts[0]
     repo = path_parts[1]
     
-    # Setup for GitHub API
-    headers = {"Accept": "application/vnd.github.v3+json"}
+    # Setup for GitHub API - add User-Agent to be a good API citizen
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": f"CloudView-GitHub-Crawler/1.0"
+    }
     if token:
         headers["Authorization"] = f"token {token}"
 
-    def fetch_branches(owner: str, repo: str):
-        """Get brancshes of the repository"""
+    def make_request(url, params=None, max_retries=5):
+        """Make a GitHub API request with caching and exponential backoff for rate limits"""
+        cache_key = f"{url}:{str(params)}"
+        
+        # Check cache first
+        if cache_key in _request_cache:
+            print(f"Cache hit for {url}")
+            return _request_cache[cache_key]
+            
+        # Implement exponential backoff for retries
+        for retry in range(max_retries):
+            response = requests.get(url, headers=headers, params=params)
+            
+            # If successful, cache the response and return
+            if response.status_code == 200:
+                # Add to cache (with simple cache size management)
+                if len(_request_cache) >= MAX_CACHE_SIZE:
+                    # Remove a random key to keep cache size in check
+                    del _request_cache[random.choice(list(_request_cache.keys()))]
+                _request_cache[cache_key] = response
+                return response
+                
+            # Handle rate limiting with exponential backoff
+            if response.status_code == 403 and 'rate limit exceeded' in response.text.lower():
+                # Get reset time from headers
+                reset_time = int(response.headers.get('X-RateLimit-Reset', 0))
+                current_time = time.time()
+                
+                # Calculate wait time with exponential backoff
+                wait_time = max(reset_time - current_time, 0)
+                if wait_time == 0:
+                    # If no reset time available, use exponential backoff
+                    wait_time = (2 ** retry) + random.uniform(0, 1)
+                
+                # Show remaining rate limit info if available
+                remaining = response.headers.get('X-RateLimit-Remaining', 'unknown')
+                limit = response.headers.get('X-RateLimit-Limit', 'unknown')
+                
+                print(f"\n⚠️ GitHub API rate limit exceeded ({remaining}/{limit} remaining requests)")
+                print(f"Waiting for {wait_time:.1f} seconds (retry {retry+1}/{max_retries})...")
+                print(f"Consider configuring a GitHub token on the Settings page to increase your rate limit.")
+                
+                time.sleep(wait_time)
+                continue
+                
+            # For other errors, just return the response
+            return response
+            
+        # If we've exhausted retries, return the last response
+        return response
 
+    def fetch_branches(owner: str, repo: str):
+        """Get branches of the repository"""
         url = f"https://api.github.com/repos/{owner}/{repo}/branches"
-        response = requests.get(url, headers=headers)
+        response = make_request(url)
 
         if response.status_code == 404:
             if not token:
                 print(f"Error 404: Repository not found or is private.\n"
-                      f"If this is a private repository, please provide a valid GitHub token via the 'token' argument or set the GITHUB_TOKEN environment variable.")
+                      f"If this is a private repository, please configure a GitHub token on the Settings page.")
             else:
                 print(f"Error 404: Repository not found or insufficient permissions with the provided token.\n"
                       f"Please verify the repository exists and the token has access to this repository.")
             return []
             
         if response.status_code != 200:
-            print(f"Error fetching the branches of {owner}/{path}: {response.status_code} - {response.text}")
+            print(f"Error fetching the branches of {owner}/{repo}: {response.status_code} - {response.text}")
             return []
 
         return response.json()
 
     def check_tree(owner: str, repo: str, tree: str):
         """Check the repository has the given tree"""
-
         url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{tree}"
-        response = requests.get(url, headers=headers)
-
+        response = make_request(url)
         return True if response.status_code == 200 else False 
 
     # Check if URL contains a specific branch/commit
@@ -178,7 +279,7 @@ def crawl_github_files(
 
         # Fetching branches is not successfully
         if len(branches) == 0:
-            return
+            return {"files": {}, "stats": {"error": "Failed to fetch repository branches. Check if the repository is valid and accessible."}}
 
         # To check branch name
         relevant_path = join_parts(3)
@@ -196,7 +297,7 @@ def crawl_github_files(
         if ref == None:
             print(f"The given path does not match with any branch and any tree in the repository.\n"
                   f"Please verify the path is exists.")
-            return
+            return {"files": {}, "stats": {"error": "Repository path not found. Please check the URL."}}
 
         # Combine all parts after the ref as the path
         part_index = 5 if '/' in ref else 4
@@ -216,26 +317,21 @@ def crawl_github_files(
         url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
         params = {"ref": ref} if ref != None else {}
         
-        response = requests.get(url, headers=headers, params=params)
+        response = make_request(url, params=params)
         
-        if response.status_code == 403 and 'rate limit exceeded' in response.text.lower():
-            reset_time = int(response.headers.get('X-RateLimit-Reset', 0))
-            wait_time = max(reset_time - time.time(), 0) + 1
-            print(f"Rate limit exceeded. Waiting for {wait_time:.0f} seconds...")
-            time.sleep(wait_time)
-            return fetch_contents(path)
-            
         if response.status_code == 404:
             if not token:
                 print(f"Error 404: Repository not found or is private.\n"
-                      f"If this is a private repository, please provide a valid GitHub token via the 'token' argument or set the GITHUB_TOKEN environment variable.")
+                      f"If this is a private repository, please configure a GitHub token on the Settings page.")
+                return
             elif not path and ref == 'main':
                 print(f"Error 404: Repository not found. Check if the default branch is not 'main'\n"
                       f"Try adding branch name to the request i.e. python main.py --repo https://github.com/username/repo/tree/master")
+                return
             else:
                 print(f"Error 404: Path '{path}' not found in repository or insufficient permissions with the provided token.\n"
                       f"Please verify the token has access to this repository and the path exists.")
-            return
+                return
             
         if response.status_code != 200:
             print(f"Error fetching {path}: {response.status_code} - {response.text}")
@@ -276,7 +372,7 @@ def crawl_github_files(
                 # For files, get raw content
                 if "download_url" in item and item["download_url"]:
                     file_url = item["download_url"]
-                    file_response = requests.get(file_url, headers=headers)
+                    file_response = make_request(file_url)
                     
                     # Final size check in case content-length header is available but differs from metadata
                     content_length = int(file_response.headers.get('content-length', 0))
@@ -292,7 +388,7 @@ def crawl_github_files(
                         print(f"Failed to download {rel_path}: {file_response.status_code}")
                 else:
                     # Alternative method if download_url is not available
-                    content_response = requests.get(item["url"], headers=headers)
+                    content_response = make_request(item["url"])
                     if content_response.status_code == 200:
                         content_data = content_response.json()
                         if content_data.get("encoding") == "base64" and "content" in content_data:
@@ -318,6 +414,24 @@ def crawl_github_files(
     # Start crawling from the specified path
     fetch_contents(specific_path)
     
+    # Show rate limit stats at the end if a token was used
+    if token:
+        try:
+            rate_limit_url = "https://api.github.com/rate_limit"
+            rate_response = requests.get(rate_limit_url, headers=headers)
+            if rate_response.status_code == 200:
+                rate_data = rate_response.json()
+                core_rate = rate_data.get('resources', {}).get('core', {})
+                remaining = core_rate.get('remaining', 'unknown')
+                limit = core_rate.get('limit', 'unknown')
+                reset_time = core_rate.get('reset', 0)
+                reset_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(reset_time))
+                
+                print(f"\nGitHub API Rate Limit: {remaining}/{limit} requests remaining")
+                print(f"Rate limit resets at: {reset_time_str}")
+        except Exception as e:
+            print(f"Failed to fetch rate limit information: {e}")
+    
     return {
         "files": files,
         "stats": {
@@ -326,7 +440,10 @@ def crawl_github_files(
             "skipped_files": skipped_files,
             "base_path": specific_path if use_relative_paths else None,
             "include_patterns": include_patterns,
-            "exclude_patterns": exclude_patterns
+            "exclude_patterns": exclude_patterns,
+            "source": "github_api",
+            "partial_clone": False,  # API fetching doesn't have partial clone concept
+            "error": None  # No error occurred if we reached this point
         }
     }
 

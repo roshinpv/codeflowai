@@ -7,3 +7,6 @@ google-genai>=1.9.0
 python-dotenv>=1.0.0
 pathspec>=0.11.0
 openai
+# Additional cloud readiness dependencies
+fastapi>=0.104.0
+uvicorn>=0.23.2

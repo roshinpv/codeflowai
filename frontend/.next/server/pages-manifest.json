@@ -3,8 +3,7 @@
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
   "/": "pages/index.js",
-  "/view/[projectName]": "pages/view/[projectName].js",
-  "/api/tutorials": "pages/api/tutorials.js",
-  "/history": "pages/history.js",
-  "/status/[jobId]": "pages/status/[jobId].js"
+  "/cloud-analysis": "pages/cloud-analysis.js",
+  "/api/cloud-history": "pages/api/cloud-history.js",
+  "/cloud-history": "pages/cloud-history.js"
 }

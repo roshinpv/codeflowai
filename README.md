@@ -18,7 +18,7 @@ This is a tutorial project of [Pocket Flow](https://github.com/The-Pocket/Pocket
 
 - Check out the [Substack Post Tutorial](https://zacharyhuang.substack.com/p/ai-codebase-knowledge-builder-full) for more!
 
-&nbsp;&nbsp;**🔸 🎉 Reached Hacker News Front Page** (April 2025) with >800 up‑votes:  [Discussion »](https://news.ycombinator.com/item?id=43739456)
+&nbsp;&nbsp;**🔸 🎉 Reached Hacker News Front Page** (April 2025) with >800 up‑votes:  [Discussion »](https://news.ycombinator.com/item?id=43739456)
 
 ## ⭐ Example Results for Popular GitHub Repositories!
 
@@ -132,3 +132,55 @@ The application will crawl the repository, analyze the codebase structure, gener
   </a>
 </div>
 <br>
+
+## Features
+
+- 🔄 **Multi-language support**: Generate tutorials in different languages.
+- 🧠 **AI-powered comprehension**: The tool automatically identifies key abstractions and relationships in the codebase.
+- 📊 **Interactive visualizations**: Relationships between components are visualized for better understanding.
+- 📝 **Markdown format**: Tutorials are generated in markdown format for easy reading and conversion.
+- 🌩️ **Cloud Readiness Analysis**: Evaluate your codebase's cloud compatibility and get recommendations for improvement.
+
+### Cloud Readiness Features
+
+The Cloud Readiness analysis provides:
+
+- 🔍 **Codebase Analysis**: Detects programming languages, frameworks, and technologies used in your codebase
+- 🏗️ **Architecture Review**: Evaluates if your application follows microservices or monolithic architecture patterns
+- 🧪 **CI/CD & DevOps Readiness**: Checks for presence of CI/CD pipelines and DevOps practices
+- 🛠️ **Cloud Compatibility**: Identifies usage of cloud services and monitoring tools
+- 🔒 **Security Analysis**: Detects potential hardcoded secrets and credentials
+- 📊 **Scoring System**: Provides an overall cloud readiness score and detailed breakdown by category
+- 📋 **Recommendations**: Offers actionable recommendations for improving cloud readiness
+
+# Cloud Readiness Analysis
+
+The application now includes comprehensive cloud readiness analysis that evaluates your codebase for:
+
+- **Language and Framework Compatibility**: Assesses how well your programming languages and frameworks work in cloud environments.
+- **Containerization**: Checks for Docker and Kubernetes configurations.
+- **CI/CD Integration**: Detects CI/CD pipelines like GitHub Actions, GitLab CI, etc.
+- **Configuration Management**: Analyzes environment variables usage and identifies hardcoded secrets.
+- **Cloud Service Integration**: Detects usage of AWS, Azure, GCP, and other cloud providers.
+- **Service Coupling**: Analyzes how tightly coupled your application is to external services.
+- **Logging Practices**: Evaluates structured logging and log level management.
+- **State Management**: Checks for stateless design patterns.
+- **Code Modularity**: Analyzes the codebase structure for modularity.
+- **Dependency Management**: Verifies proper dependency management tools.
+- **Health Checks**: Identifies health check endpoints.
+- **Testing Coverage**: Evaluates unit and integration tests.
+- **Instrumentation**: Checks for metrics, tracing, and profiling.
+- **Infrastructure as Code**: Detects Terraform, CloudFormation, and other IaC tools.
+
+## Cloud Readiness Dashboard
+
+The application provides a cloud readiness dashboard that shows:
+
+1. Overall cloud readiness score
+2. Application summary with architecture type, languages, and cloud features
+3. Detailed breakdown of scores by category
+4. Key recommendations for improving cloud readiness
+
+To access the dashboard, navigate to:
+- `/view/cloud-dashboard/[project_name]` - Interactive dashboard
+- `/view/cloud-report/[project_name]` - Full detailed report

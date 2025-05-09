@@ -1,10 +1,14 @@
 import os
 import re
 import yaml
+import json
 from pocketflow import Node, BatchNode
 from utils.crawl_github_files import crawl_github_files
 from utils.call_llm import call_llm
 from utils.crawl_local_files import crawl_local_files
+from utils.cloud_analyzer import analyze_cloud_readiness
+from utils.status_updater import StatusUpdater
+from utils.logging_utils import get_logger
 
 
 # Helper to get content for specific file indices
@@ -71,9 +75,21 @@ class FetchRepo(Node):
 
         # Convert dict to list of tuples: [(path, content), ...]
         files_list = list(result.get("files", {}).items())
-        if len(files_list) == 0:
-            raise (ValueError("Failed to fetch files"))
-        print(f"Fetched {len(files_list)} files.")
+        files_count = len(files_list)
+        
+        # Check if we have a partial clone situation
+        is_partial_clone = result.get("stats", {}).get("partial_clone", False)
+        error_message = result.get("stats", {}).get("error", None)
+        
+        if files_count == 0:
+            # No files at all - raise error
+            raise ValueError("Failed to fetch files")
+        elif is_partial_clone and files_count > 0:
+            # We have some files despite git-lfs errors
+            print(f"Warning: Partial repository clone due to git-lfs issues. Proceeding with {files_count} available files.")
+            print(f"Error details: {error_message}")
+            
+        print(f"Fetched {files_count} files.")
         return files_list
 
     def post(self, shared, prep_res, exec_res):
@@ -894,3 +910,632 @@ class CombineTutorial(Node):
     def post(self, shared, prep_res, exec_res):
         shared["final_output_dir"] = exec_res  # Store the output path
         print(f"\nTutorial generation complete! Files are in: {exec_res}")
+
+
+class CloudReadinessAnalysis(BatchNode):
+    """Performs cloud readiness analysis on the codebase with progress updates"""
+    
+    def prep(self, shared):
+        """
+        Prepare files and project name for cloud analysis.
+        Sets up status tracking and divides files into batches for processing.
+        """
+        use_llm = shared.get("use_llm_cloud_analysis", True)  # Default to True
+        files_data = shared["files"]
+        project_name = shared["project_name"]
+        github_token = shared.get("github_token")
+        job_id = shared.get("job_id")
+        
+        # Set up logging
+        self.logger = get_logger('cloud_analysis')
+        self.logger.info(f"Starting cloud readiness analysis for project: {project_name}")
+        self.logger.info(f"Analysis options: use_llm={use_llm}, files_count={len(files_data)}")
+        
+        # Initialize status updater if job_id is provided
+        if job_id and 'jobs' in shared:
+            self.logger.info(f"Using status updater for job {job_id}")
+            self.status_updater = StatusUpdater(job_id, shared['jobs'])
+            
+            # Define the processing phases
+            phases = [
+                "setup", 
+                "language_detection",
+                "secrets_check",
+                "architecture_analysis",
+                "component_analysis",
+                "llm_analysis", 
+                "score_calculation",
+                "recommendation_generation"
+            ]
+            self.status_updater.set_phases(phases)
+            
+            # Start with setup phase
+            self.status_updater.update_phase("setup", "Initializing cloud readiness analysis")
+        else:
+            self.logger.info("No job ID provided, running without status updates")
+            self.status_updater = None
+            
+        # Store basic parameters for use in exec and post
+        self.use_llm = use_llm
+        self.project_name = project_name
+        self.github_token = github_token
+            
+        # Divide files into manageable batches for processing
+        # Using a reasonable batch size to provide granular progress updates
+        batch_size = 50
+        file_batches = []
+        
+        for i in range(0, len(files_data), batch_size):
+            batch = files_data[i:i+batch_size]
+            file_batches.append(batch)
+        
+        batch_count = len(file_batches)
+        total_files = len(files_data)
+        self.logger.info(f"Divided {total_files} files into {batch_count} batches (batch size: {batch_size})")
+            
+        if self.status_updater:
+            self.status_updater.set_phase_items(batch_count, f"Processing {total_files} files in {batch_count} batches")
+            
+        return file_batches
+        
+    def exec(self, file_batch):
+        """
+        Process a batch of files for cloud readiness analysis
+        
+        Args:
+            file_batch: A batch of files to analyze
+            
+        Returns:
+            Partial results for this batch of files
+        """
+        # Import here so it's available in the exec method
+        from utils.cloud_analyzer import detect_language_frameworks, check_hardcoded_secrets, analyze_architecture
+        from utils.cloud_analyzer import check_environment_variables, analyze_service_coupling, analyze_logging_practices
+        from utils.cloud_analyzer import analyze_state_management, analyze_code_modularity, analyze_dependency_management
+        from utils.cloud_analyzer import detect_health_check_endpoints, analyze_testing_coverage, analyze_instrumentation
+        
+        # Process this batch of files
+        batch_results = {}
+        batch_size = len(file_batch)
+        self.logger.info(f"Processing batch of {batch_size} files")
+        
+        # Language and framework detection
+        if self.status_updater:
+            self.status_updater.update_phase("language_detection", "Detecting programming languages and frameworks")
+        
+        self.logger.info("Detecting languages and frameworks")
+        tech_analysis = detect_language_frameworks(file_batch)
+        batch_results["tech_analysis"] = tech_analysis
+        
+        # Log detected languages and frameworks
+        languages = tech_analysis.get("languages", {})
+        frameworks = tech_analysis.get("frameworks", {})
+        if languages:
+            lang_str = ", ".join([f"{lang}:{count}" for lang, count in languages.items()])
+            self.logger.info(f"Detected languages: {lang_str}")
+        if frameworks:
+            fw_str = ", ".join([f"{fw}:{count}" for fw, count in frameworks.items()])
+            self.logger.info(f"Detected frameworks: {fw_str}")
+        
+        # Secrets check
+        if self.status_updater:
+            self.status_updater.update_phase("secrets_check", "Checking for hardcoded secrets")
+        
+        self.logger.info("Checking for hardcoded secrets")
+        secrets_analysis = check_hardcoded_secrets(file_batch)
+        batch_results["secrets_analysis"] = secrets_analysis
+        
+        # Log secrets findings
+        secret_count = secrets_analysis.get("secrets_count", 0)
+        self.logger.info(f"Found {secret_count} potential secrets in this batch")
+        
+        # Environment variables
+        self.logger.info("Analyzing environment variables usage")
+        env_vars_analysis = check_environment_variables(file_batch)
+        batch_results["env_vars_analysis"] = env_vars_analysis
+        
+        # Log env vars findings
+        env_vars_count = env_vars_analysis.get("count", 0)
+        self.logger.info(f"Found {env_vars_count} environment variable references in this batch")
+        
+        # Component analysis (update status for each component)
+        if self.status_updater:
+            self.status_updater.update_phase("component_analysis", "Analyzing code components")
+            components_total = 6  # Number of component analyses
+            self.status_updater.set_phase_items(components_total)
+        
+        self.logger.info("Starting component analysis")
+        
+        # Service coupling
+        self.logger.info("Analyzing service coupling")
+        coupling_analysis = analyze_service_coupling(file_batch)
+        batch_results["coupling_analysis"] = coupling_analysis
+        if self.status_updater:
+            self.status_updater.increment_progress(1, "Analyzed service coupling")
+        
+        # Logging practices
+        self.logger.info("Analyzing logging practices")
+        logging_analysis = analyze_logging_practices(file_batch)
+        batch_results["logging_analysis"] = logging_analysis
+        if self.status_updater:
+            self.status_updater.increment_progress(1, "Analyzed logging practices")
+        
+        # State management
+        self.logger.info("Analyzing state management")
+        state_management = analyze_state_management(file_batch)
+        batch_results["state_management"] = state_management
+        if self.status_updater:
+            self.status_updater.increment_progress(1, "Analyzed state management")
+        
+        # Code modularity
+        self.logger.info("Analyzing code modularity")
+        modularity_analysis = analyze_code_modularity(file_batch)
+        batch_results["modularity_analysis"] = modularity_analysis
+        if self.status_updater:
+            self.status_updater.increment_progress(1, "Analyzed code modularity")
+        
+        # Dependency management
+        self.logger.info("Analyzing dependency management")
+        dependency_analysis = analyze_dependency_management(file_batch)
+        batch_results["dependency_analysis"] = dependency_analysis
+        if self.status_updater:
+            self.status_updater.increment_progress(1, "Analyzed dependency management")
+        
+        # Health checks, testing, and instrumentation
+        self.logger.info("Analyzing health checks, testing, and instrumentation")
+        health_check_analysis = detect_health_check_endpoints(file_batch)
+        testing_analysis = analyze_testing_coverage(file_batch)
+        instrumentation_analysis = analyze_instrumentation(file_batch)
+        
+        batch_results["health_check_analysis"] = health_check_analysis
+        batch_results["testing_analysis"] = testing_analysis
+        batch_results["instrumentation_analysis"] = instrumentation_analysis
+        
+        if self.status_updater:
+            self.status_updater.increment_progress(1, "Completed component analysis")
+            
+        self.logger.info("Completed batch analysis")
+        
+        # Return partial results for this batch
+        return batch_results
+        
+    def post(self, shared, prep_res, exec_res_list):
+        """
+        Combine batch results and generate final analysis
+        
+        Args:
+            shared: Shared data store
+            prep_res: Output from prep (list of file batches)
+            exec_res_list: List of batch results from exec
+        """
+        from utils.cloud_analyzer import analyze_architecture, analyze_cloud_readiness_with_llm
+        from utils.cloud_analyzer import calculate_cloud_readiness_scores, generate_recommendations
+        import os
+        import json
+        
+        batch_count = len(exec_res_list)
+        file_count = sum(len(batch) for batch in prep_res)
+        self.logger.info(f"Combining results from {batch_count} batches (total files: {file_count})")
+        
+        # Start with architecture analysis phase
+        if self.status_updater:
+            self.status_updater.update_phase("architecture_analysis", "Analyzing application architecture")
+        
+        # Combine results from all batches
+        tech_analysis = {"languages": {}, "frameworks": {}, "databases": {}, "cloud_services": {}, "containerization": {}, "cicd": {}, "monitoring": {}, "iac": {}, "files": shared["files"]}
+        secrets_analysis = {"has_secrets": False, "secrets_count": 0, "files_with_secrets": []}
+        env_vars_analysis = {"count": 0, "variables": set(), "files": []}
+        coupling_analysis = {"count": 0, "services": {}}
+        logging_analysis = {"has_logging": False, "logging_count": 0, "files_with_logging": [], "structured_logging": 0, "basic_logging": 0, "log_levels": 0, "files": []}
+        state_management = {"has_state_mgmt": False, "state_count": 0, "files_with_state": [], "stateless": 0, "persistent_state": 0, "database_state": 0, "files": []}
+        modularity_analysis = {"modularity_score": 0, "component_count": 0, "files_by_component": {}}
+        dependency_analysis = {"has_dependency_mgmt": False, "dependency_files": []}
+        health_check_analysis = {"has_health_endpoints": False, "count": 0, "health_endpoints": [], "files": []}
+        testing_analysis = {"has_tests": False, "test_count": 0, "test_files": [], "unit_tests": 0, "integration_tests": 0, "mocking": 0, "files": []}
+        instrumentation_analysis = {"has_instrumentation": False, "instrumentation_count": 0, "files_with_instrumentation": [], "metrics": 0, "tracing": 0, "profiling": 0, "files": []}
+        
+        self.logger.info("Merging batch results")
+        
+        # Process and merge each batch result
+        for i, batch_result in enumerate(exec_res_list):
+            self.logger.info(f"Merging batch {i+1}/{batch_count}")
+            
+            # Merge tech analysis
+            for tech_category in ["languages", "frameworks", "databases", "cloud_services", "containerization", "cicd", "monitoring", "iac"]:
+                if tech_category in batch_result.get("tech_analysis", {}):
+                    self.logger.debug(f"Merging {tech_category} from batch {i+1}")
+                    for item, count in batch_result["tech_analysis"][tech_category].items():
+                        tech_analysis[tech_category][item] = tech_analysis[tech_category].get(item, 0) + count
+            
+            # Merge secrets analysis
+            secrets_result = batch_result.get("secrets_analysis", {})
+            if secrets_result.get("has_secrets", False):
+                secrets_analysis["has_secrets"] = True
+                self.logger.debug(f"Batch {i+1} has secrets")
+            secret_count = secrets_result.get("secrets_count", 0)
+            if secret_count > 0:
+                self.logger.debug(f"Batch {i+1} has {secret_count} potential secrets")
+            secrets_analysis["secrets_count"] += secret_count
+            secrets_analysis["files_with_secrets"].extend(secrets_result.get("files_with_secrets", []))
+            
+            # Merge environment variables analysis
+            env_result = batch_result.get("env_vars_analysis", {})
+            env_vars_count = env_result.get("count", 0)
+            if env_vars_count > 0:
+                self.logger.debug(f"Batch {i+1} has {env_vars_count} environment variables")
+            env_vars_analysis["count"] += env_vars_count
+            env_vars_analysis["variables"].update(env_result.get("variables", set()))
+            env_vars_analysis["files"].extend(env_result.get("files", []))
+            
+            # Merge service coupling analysis
+            coupling_result = batch_result.get("coupling_analysis", {})
+            coupling_count = coupling_result.get("count", 0)
+            if coupling_count > 0:
+                self.logger.debug(f"Batch {i+1} has {coupling_count} service couplings")
+            coupling_analysis["count"] += coupling_count
+            for service, details in coupling_result.get("services", {}).items():
+                if service not in coupling_analysis["services"]:
+                    coupling_analysis["services"][service] = details
+                else:
+                    # Ensure both values are dictionaries before merging
+                    if isinstance(coupling_analysis["services"][service], dict) and isinstance(details, dict):
+                        # Merge details
+                        self._merge_analysis(coupling_analysis["services"][service], details)
+                    elif isinstance(details, dict):
+                        # If target is not a dict but the source is, replace with the source
+                        self.logger.warning(f"Type mismatch in coupling_analysis: service {service} is {type(coupling_analysis['services'][service])}, not dict. Replacing with source.")
+                        coupling_analysis["services"][service] = details
+                    elif isinstance(coupling_analysis["services"][service], dict):
+                        # If source is not a dict but the target is, do nothing or add details as a special key
+                        self.logger.warning(f"Type mismatch in coupling_analysis: details for service {service} is {type(details)}, not dict. Adding as 'raw_data'.")
+                        coupling_analysis["services"][service]["raw_data"] = details
+                    else:
+                        # If neither is a dict, warn and skip
+                        self.logger.warning(f"Both target and source are not dictionaries for service {service}. Target: {type(coupling_analysis['services'][service])}, Source: {type(details)}. Skipping merge.")
+            
+            # Merge logging analysis
+            logging_result = batch_result.get("logging_analysis", {})
+            if logging_result.get("has_logging", False):
+                logging_analysis["has_logging"] = True
+                self.logger.debug(f"Batch {i+1} has logging")
+            logging_count = logging_result.get("logging_count", 0)
+            if logging_count > 0:
+                self.logger.debug(f"Batch {i+1} has {logging_count} logging instances")
+            logging_analysis["logging_count"] += logging_count
+            logging_analysis["files_with_logging"].extend(logging_result.get("files_with_logging", []))
+            
+            # Merge other analyses
+            self._merge_analysis(state_management, batch_result.get("state_management", {}))
+            self._merge_analysis(modularity_analysis, batch_result.get("modularity_analysis", {}))
+            self._merge_analysis(dependency_analysis, batch_result.get("dependency_analysis", {}))
+            self._merge_analysis(health_check_analysis, batch_result.get("health_check_analysis", {}))
+            self._merge_analysis(testing_analysis, batch_result.get("testing_analysis", {}))
+            self._merge_analysis(instrumentation_analysis, batch_result.get("instrumentation_analysis", {}))
+        
+        # Convert sets to lists for JSON serialization
+        env_vars_analysis["variables"] = list(env_vars_analysis["variables"])
+        
+        # Log the final counts
+        self.logger.info(f"Merged {batch_count} batches. Found:")
+        self.logger.info(f"- {len(tech_analysis['languages'])} languages")
+        self.logger.info(f"- {len(tech_analysis['frameworks'])} frameworks")
+        self.logger.info(f"- {secrets_analysis['secrets_count']} potential secrets")
+        self.logger.info(f"- {env_vars_analysis['count']} environment variables")
+        self.logger.info(f"- {logging_analysis['logging_count']} logging instances")
+        
+        # Perform architecture analysis with the combined results
+        self.logger.info("Analyzing architecture patterns")
+        
+        # Ensure all required keys exist in tech_analysis
+        required_keys = ["languages", "frameworks", "databases", "cloud_services", 
+                         "containerization", "cicd", "monitoring", "iac"]
+        for key in required_keys:
+            if key not in tech_analysis:
+                self.logger.warning(f"Key '{key}' missing in tech_analysis, adding empty dictionary")
+                tech_analysis[key] = {}
+                
+        architecture = analyze_architecture(tech_analysis)
+        
+        # Log architecture analysis results
+        if architecture:
+            arch_patterns = architecture.get("patterns", [])
+            self.logger.info(f"Detected {len(arch_patterns)} architecture patterns: {', '.join(arch_patterns)}")
+        
+        # Perform LLM-based analysis if requested
+        llm_analysis = None
+        if self.use_llm:
+            if self.status_updater:
+                self.status_updater.update_phase("llm_analysis", "Performing LLM-based analysis")
+            
+            self.logger.info("Starting LLM-based analysis")
+            try:
+                self.logger.info("Calling LLM for cloud readiness analysis")
+                llm_analysis = analyze_cloud_readiness_with_llm(shared["files"], self.project_name)
+                
+                # Log LLM results
+                if llm_analysis:
+                    key_strengths = llm_analysis.get("key_strengths", [])
+                    key_weaknesses = llm_analysis.get("key_weaknesses", [])
+                    self.logger.info(f"LLM analysis complete: found {len(key_strengths)} strengths and {len(key_weaknesses)} weaknesses")
+                    
+                    if self.status_updater:
+                        self.status_updater.update_detailed_status("llm_strengths", len(key_strengths))
+                        self.status_updater.update_detailed_status("llm_weaknesses", len(key_weaknesses))
+            except Exception as e:
+                error_msg = f"Error in LLM analysis: {str(e)}"
+                self.logger.error(error_msg)
+                if self.status_updater:
+                    self.status_updater.update_detailed_status("llm_error", str(e))
+        else:
+            self.logger.info("Skipping LLM-based analysis (disabled)")
+        
+        # Calculate cloud readiness scores
+        if self.status_updater:
+            self.status_updater.update_phase("score_calculation", "Calculating readiness scores")
+        
+        self.logger.info("Calculating cloud readiness scores")
+        rule_based_scores = calculate_cloud_readiness_scores(
+            tech_analysis, 
+            secrets_analysis, 
+            architecture,
+            env_vars_analysis,
+            coupling_analysis,
+            logging_analysis,
+            state_management,
+            modularity_analysis,
+            dependency_analysis,
+            health_check_analysis,
+            testing_analysis,
+            instrumentation_analysis
+        )
+        
+        # Log rule-based scores
+        self.logger.info(f"Rule-based overall score: {rule_based_scores.get('overall', 0):.2f}")
+        
+        # Combine scores if LLM analysis is available
+        scores = rule_based_scores
+        if llm_analysis and self.use_llm:
+            self.logger.info("Combining rule-based and LLM-based scores")
+            
+            # Import the score map
+            from utils.cloud_analyzer import max_score_map
+            
+            # Convert LLM scores to our scale
+            llm_scores = {}
+            for factor, data in llm_analysis["factors"].items():
+                # Skip factors not in our scoring system
+                if factor not in max_score_map:
+                    continue
+                
+                # Convert from 1-10 to our scale
+                if isinstance(data, dict) and "score" in data:
+                    max_score = max_score_map.get(factor, 10)
+                    normalized_score = (data["score"] / 10) * max_score
+                    llm_scores[factor] = normalized_score
+            
+            # Blend scores (60% rule-based, 40% LLM-based)
+            blended_scores = {}
+            for factor in rule_based_scores:
+                if factor in llm_scores:
+                    raw_blended = 0.6 * rule_based_scores[factor] + 0.4 * llm_scores[factor]
+                    # Cap at maximum score for this factor
+                    max_score = max_score_map.get(factor, 10)
+                    blended_scores[factor] = min(raw_blended, max_score)
+                else:
+                    # Also cap rule-based scores at their maximum
+                    max_score = max_score_map.get(factor, 10)
+                    blended_scores[factor] = min(rule_based_scores[factor], max_score)
+            
+            # Calculate overall score
+            overall_sum = sum([blended_scores[f] for f in blended_scores if f != 'overall'])
+            
+            # Normalize to 0-100 range
+            total_possible_score = sum(max_score_map.values())
+            blended_scores['overall'] = max(0, min(round((overall_sum / total_possible_score) * 100), 100))
+            
+            # Use the blended scores
+            scores = blended_scores
+            
+            # Log blended scores
+            self.logger.info(f"Blended overall score: {scores.get('overall', 0):.2f}")
+        
+        # Determine readiness level based on overall score
+        readiness_level = "Unknown"
+        if scores['overall'] >= 80:
+            readiness_level = "Cloud-Native"
+        elif scores['overall'] >= 60:
+            readiness_level = "Cloud-Ready"
+        elif scores['overall'] >= 40:
+            readiness_level = "Cloud-Friendly"
+        else:
+            readiness_level = "Cloud-Challenged"
+        
+        self.logger.info(f"Determined readiness level: {readiness_level}")
+        
+        # Generate recommendations
+        if self.status_updater:
+            self.status_updater.update_phase("recommendation_generation", "Generating recommendations")
+        
+        self.logger.info("Generating improvement recommendations")
+        recommendations = generate_recommendations(
+            tech_analysis, 
+            secrets_analysis, 
+            architecture, 
+            scores,
+            env_vars_analysis,
+            coupling_analysis,
+            logging_analysis,
+            state_management,
+            modularity_analysis,
+            dependency_analysis,
+            health_check_analysis,
+            testing_analysis,
+            instrumentation_analysis
+        )
+        
+        self.logger.info(f"Generated {len(recommendations)} recommendations")
+        
+        # Create the final report
+        self.logger.info("Assembling final report")
+        report = {
+            'technology_stack': tech_analysis,
+            'architecture': architecture,
+            'secrets': secrets_analysis,
+            'environment_variables': env_vars_analysis,
+            'service_coupling': coupling_analysis,
+            'logging_practices': logging_analysis,
+            'state_management': state_management,
+            'code_modularity': modularity_analysis,
+            'dependency_management': dependency_analysis,
+            'health_checks': health_check_analysis,
+            'testing_coverage': testing_analysis,
+            'instrumentation': instrumentation_analysis,
+            'scores': scores,
+            'overall_score': scores['overall'],
+            'readiness_level': readiness_level,
+            'recommendations': recommendations
+        }
+        
+        # Add LLM analysis if available
+        if llm_analysis and self.use_llm:
+            self.logger.info("Adding LLM analysis to report")
+            # Add relevant parts of LLM analysis
+            report['llm_analysis'] = {
+                'summary': llm_analysis.get('summary', ''),
+                'key_strengths': llm_analysis.get('key_strengths', []),
+                'key_weaknesses': llm_analysis.get('key_weaknesses', []),
+                'factors': llm_analysis.get('factors', {}),
+            }
+            # Add LLM recommendations to our rule-based ones
+            llm_recs_count = 0
+            for factor, data in llm_analysis.get('factors', {}).items():
+                if isinstance(data, dict) and 'recommendations' in data:
+                    # Create a new recommendation from LLM insight
+                    llm_rec = {
+                        'category': factor,
+                        'priority': 'medium',
+                        'description': data['recommendations'],
+                        'source': 'llm'
+                    }
+                    report['recommendations'].append(llm_rec)
+                    llm_recs_count += 1
+            
+            self.logger.info(f"Added {llm_recs_count} LLM-based recommendations")
+        
+        # Store output in shared dictionary
+        shared["cloud_analysis"] = report
+        
+        # Create output directory
+        output_dir = os.path.join(shared["output_dir"], self.project_name)
+        shared["final_output_dir"] = output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Save the cloud readiness analysis to the output directory
+        json_path = os.path.join(output_dir, "cloud_readiness.json")
+        self.logger.info(f"Saving cloud readiness analysis to {json_path}")
+        with open(json_path, "w") as f:
+            json.dump(report, f, indent=2)
+            
+        print(f"Cloud readiness analysis saved to {output_dir}/cloud_readiness.json")
+        self.logger.info(f"Analysis complete for project {self.project_name}")
+        
+        # Complete the status tracking
+        if self.status_updater:
+            self.status_updater.update_detailed_status("readiness_level", readiness_level)
+            self.status_updater.update_detailed_status("overall_score", scores['overall'])
+            self.status_updater.update_detailed_status("recommendations_count", len(recommendations))
+            self.status_updater.complete(True)
+            
+        return "default"
+    
+    def _merge_analysis(self, target, source):
+        """Helper method to merge analysis dictionaries"""
+        # If source is a list, we can't call items() on it
+        if isinstance(source, list):
+            self.logger.warning(f"Source is a list in _merge_analysis, not a dictionary. This is unexpected behavior.")
+            # If target is also a list, extend it
+            if isinstance(target, list):
+                target.extend(source)
+                self.logger.debug(f"Extended target list with {len(source)} items from source list")
+            # If target is not a list, replace it with source
+            else:
+                self.logger.warning(f"Type mismatch in _merge_analysis: target is {type(target)}, source is list. Replacing target with source.")
+                return source
+            return target
+            
+        # Process dictionary as before
+        for key, value in source.items():
+            if isinstance(value, dict):
+                if key not in target:
+                    target[key] = {}
+                    self.logger.debug(f"Created new dictionary for key {key}")
+                elif not isinstance(target[key], dict):
+                    self.logger.warning(f"Type mismatch in _merge_analysis: target[{key}] is {type(target[key])}, not dict")
+                    target[key] = {}
+                self._merge_analysis(target[key], value)
+            elif isinstance(value, list):
+                if key not in target:
+                    target[key] = []
+                    self.logger.debug(f"Created new list for key {key}")
+                elif not isinstance(target[key], list):
+                    self.logger.warning(f"Type mismatch in _merge_analysis: target[{key}] is {type(target[key])}, not list")
+                    # Convert to list with existing value as first element if not already a list
+                    target[key] = [target[key]]
+                # Only extend lists, don't try to add them
+                target[key].extend(value)
+                self.logger.debug(f"Extended list for key {key} with {len(value)} items")
+            elif isinstance(value, (int, float)):
+                # For numeric values, we'll add them
+                if key not in target:
+                    target[key] = value
+                    self.logger.debug(f"Created new numeric value for key {key}: {value}")
+                elif isinstance(target[key], (int, float)):
+                    # If both are numeric, add them
+                    target[key] = target[key] + value
+                    self.logger.debug(f"Added numeric value to key {key}: {target[key]}")
+                elif isinstance(target[key], list):
+                    # If target is a list, append the numeric value
+                    self.logger.warning(f"Type mismatch in _merge_analysis: trying to add {type(value)} to list for key {key}")
+                    target[key].append(value)
+                    self.logger.debug(f"Appended numeric value to list for key {key}")
+                else:
+                    # Handle other type mismatches
+                    self.logger.warning(f"Type mismatch in _merge_analysis: cannot add {type(value)} to {type(target[key])} for key {key}")
+                    # Convert both to strings and concatenate as a fallback
+                    target[key] = str(target[key]) + " | " + str(value)
+            elif isinstance(value, bool):
+                # For boolean values, use OR operation
+                if key not in target:
+                    target[key] = value
+                    self.logger.debug(f"Created new boolean value for key {key}: {value}")
+                elif isinstance(target[key], bool):
+                    target[key] = target[key] or value
+                    self.logger.debug(f"Applied OR operation for boolean key {key}: {target[key]}")
+                else:
+                    self.logger.warning(f"Type mismatch in _merge_analysis: cannot apply OR to {type(target[key])} for key {key}")
+                    # Just override with the boolean value
+                    target[key] = value
+            else:
+                # For other values, just override
+                if key in target and type(target[key]) != type(value):
+                    self.logger.debug(f"Overriding different type for key {key}: {type(target[key])} -> {type(value)}")
+                target[key] = value
+        return target
+
+# Add a helper max score map for the scores
+max_score_map = {
+    "language_compatibility": 15,
+    "containerization": 15,
+    "ci_cd": 10,
+    "configuration": 10,
+    "cloud_integration": 10,
+    "service_coupling": 5,
+    "logging_practices": 5,
+    "state_management": 5,
+    "code_modularity": 5,
+    "dependency_management": 5,
+    "health_checks": 5,
+    "testing": 5,
+    "instrumentation": 5,
+    "infrastructure_as_code": 5
+}

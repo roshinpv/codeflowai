@@ -23,7 +23,9 @@ export default function Navigation({ transparent = false }: NavigationProps) {
   // Define navigation items
   const navItems = [
     { name: 'Home', href: '/' },
-    { name: 'History', href: '/history' },
+    { name: 'Cloud Analysis', href: '/cloud-analysis' },
+    { name: 'Cloud History', href: '/cloud-history' },
+    { name: 'Settings', href: '/settings' },
     { name: 'Docs', href: 'https://github.com/the-pocket/PocketFlow', external: true }
   ];
 
@@ -43,13 +45,18 @@ export default function Navigation({ transparent = false }: NavigationProps) {
     ? 'text-white'
     : 'text-gray-800';
 
+  // Always keep logo text visible regardless of background
+  const logoColorClass = 'text-white';
+
   return (
     <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${bgColorClass}`}>
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16">
           <div className="flex items-center">
             <Link href="/" className="flex-shrink-0 flex items-center">
-              <span className="font-bold text-xl tracking-tight text-wf-red">CodeFlowAI</span>
+              <div className="bg-wf-red px-3 py-1 rounded">
+                <span className="font-bold text-xl tracking-tight text-white">CloudView</span>
+              </div>
             </Link>
           </div>
 
